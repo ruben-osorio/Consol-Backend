@@ -49,9 +49,16 @@ namespace Consolidado.Models
     public class MarcadoDiario
     {
         public string? Fecha { get; set; }
-        public List<string> Entradas { get; set; } = new();
-        public List<string> Salidas { get; set; } = new();
+        public List<MarcadoTurno> Turnos { get; set; } = new();
         public string? Estado { get; set; }
+        public int MinutosAtraso { get; set; }
+    }
+
+    public class MarcadoTurno
+    {
+        public string? NombreTurno { get; set; }
+        public string? HoraEntrada { get; set; }
+        public string? HoraSalida { get; set; }
         public int MinutosAtraso { get; set; }
     }
 } 

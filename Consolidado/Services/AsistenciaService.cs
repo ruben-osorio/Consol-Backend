@@ -68,7 +68,7 @@ namespace Consolidado.Services
                 }
             }
 
-            return asistencias;
+            return asistencias.Where(a => !(string.IsNullOrEmpty(a.MEntrada) && string.IsNullOrEmpty(a.MSalida))).ToList();
         }
 
         public async Task<AsistenciaPivotData> GetAsistenciasPivot(string departmentName, DateTime startDate, DateTime endDate)
@@ -131,6 +131,9 @@ namespace Consolidado.Services
                 if (string.IsNullOrEmpty(asistencia.IdCarnet))
                     continue;
 
+                if (string.IsNullOrEmpty(asistencia.MEntrada) && string.IsNullOrEmpty(asistencia.MSalida))
+                    continue;
+
                 if (!planillas.ContainsKey(asistencia.IdCarnet))
                 {
                     if (string.IsNullOrEmpty(asistencia.ApellidoPaterno))
@@ -157,21 +160,50 @@ namespace Consolidado.Services
                     };
                 }
 
-                var marcado = new MarcadoDiario
+                var fechaKey = asistencia.Fecha.ToString("dd/MM/yyyy");
+                
+                // Verificar si ya existe un marcado para esta fecha
+                if (!planillas[asistencia.IdCarnet].Marcados.ContainsKey(fechaKey))
                 {
-                    Fecha = asistencia.Fecha.ToString("dd/MM/yyyy"),
+                    planillas[asistencia.IdCarnet].Marcados[fechaKey] = new MarcadoDiario
+                    {
+                        Fecha = fechaKey,
+                        MinutosAtraso = 0
+                    };
+                }
+                
+                var marcado = planillas[asistencia.IdCarnet].Marcados[fechaKey];
+                
+                // Crear un nuevo turno con sus marcaciones
+                var turno = new MarcadoTurno
+                {
+                    NombreTurno = asistencia.Horario,
+                    HoraEntrada = asistencia.MEntrada,
+                    HoraSalida = asistencia.MSalida,
                     MinutosAtraso = asistencia.Atraso
                 };
 
-                if (!string.IsNullOrEmpty(asistencia.MEntrada))
-                    marcado.Entradas.Add(asistencia.MEntrada);
-                if (!string.IsNullOrEmpty(asistencia.MSalida))
-                    marcado.Salidas.Add(asistencia.MSalida);
-
-                // Determinar el estado basado en las marcaciones
+                // Agregar el turno a la lista
+                marcado.Turnos.Add(turno);
+                
+                // Actualizar el atraso total para esta fecha
+                marcado.MinutosAtraso += asistencia.Atraso;
+                
+                // Determinar el estado del marcado
                 marcado.Estado = DeterminarEstado(asistencia);
+            }
 
-                planillas[asistencia.IdCarnet].Marcados[asistencia.Fecha.ToString("dd/MM/yyyy")] = marcado;
+            // Ordenar cronológicamente los turnos para cada marcado diario
+            foreach (var planilla in planillas.Values)
+            {
+                foreach (var marcadoPair in planilla.Marcados)
+                {
+                    var marcado = marcadoPair.Value;
+                    // Ordenar los turnos por hora de entrada (de temprano a tarde)
+                    marcado.Turnos = marcado.Turnos
+                        .OrderBy(t => string.IsNullOrEmpty(t.HoraEntrada) ? "23:59" : t.HoraEntrada)
+                        .ToList();
+                }
             }
 
             return planillas.Values;
