@@ -10,10 +10,36 @@ using NReco.PivotData;
 
 namespace Consolidado.Services
 {
+    /// <summary>
+    /// Servicio para gestionar las asistencias del personal
+    /// </summary>
     public interface IAsistenciaService
     {
-        Task<IEnumerable<AsistenciaModel>> GetAsistencias(string departmentName, DateTime startDate, DateTime endDate);
+        /// <summary>
+        /// Obtiene el registro de asistencias de un empleado por su CI
+        /// </summary>
+        /// <param name="ci">Código de identificación del empleado</param>
+        /// <param name="startDate">Fecha de inicio del período de búsqueda</param>
+        /// <param name="endDate">Fecha de fin del período de búsqueda</param>
+        /// <returns>Lista de registros de asistencia del empleado</returns>
+        Task<IEnumerable<AsistenciaModel>> GetAsistencias(string ci, DateTime startDate, DateTime endDate);
+
+        /// <summary>
+        /// Obtiene un resumen pivotado de las asistencias por departamento
+        /// </summary>
+        /// <param name="departmentName">Nombre del departamento</param>
+        /// <param name="startDate">Fecha de inicio del período de búsqueda</param>
+        /// <param name="endDate">Fecha de fin del período de búsqueda</param>
+        /// <returns>Datos pivotados de asistencia del departamento</returns>
         Task<AsistenciaPivotData> GetAsistenciasPivot(string departmentName, DateTime startDate, DateTime endDate);
+
+        /// <summary>
+        /// Obtiene la planilla de asistencia por departamento
+        /// </summary>
+        /// <param name="departmentName">Nombre del departamento</param>
+        /// <param name="startDate">Fecha de inicio del período de búsqueda</param>
+        /// <param name="endDate">Fecha de fin del período de búsqueda</param>
+        /// <returns>Planilla de asistencia del departamento</returns>
         Task<IEnumerable<PlanillaAsistenciaModel>> GetPlanillaAsistencia(string departmentName, DateTime startDate, DateTime endDate);
     }
 
@@ -27,49 +53,78 @@ namespace Consolidado.Services
                 throw new ArgumentNullException(nameof(configuration), "La cadena de conexión no puede ser nula");
         }
 
-        public async Task<IEnumerable<AsistenciaModel>> GetAsistencias(string NombreDepartamento, DateTime startDate, DateTime endDate)
+        public async Task<IEnumerable<AsistenciaModel>> GetAsistencias(string ci, DateTime startDate, DateTime endDate)
         {
             var asistencias = new List<AsistenciaModel>();
 
-            using (var connection = new SqlConnection(_connectionString))
+            try
             {
-                using (var command = new SqlCommand("sp_get_asistencias", connection))
+                using (var connection = new SqlConnection(_connectionString))
                 {
-                    command.CommandType = CommandType.StoredProcedure;
-                    command.Parameters.AddWithValue("@dept_name", NombreDepartamento);
-                    command.Parameters.AddWithValue("@start_date", startDate);
-                    command.Parameters.AddWithValue("@end_date", endDate);
-
                     await connection.OpenAsync();
 
-                    using (var reader = await command.ExecuteReaderAsync())
+                    using (var command = new SqlCommand("sp_get_asistencias_ci", connection))
                     {
-                        while (await reader.ReadAsync())
+                        command.CommandType = CommandType.StoredProcedure;
+                        
+                        // Agregar parámetros con tipos específicos
+                        command.Parameters.Add("@ci", SqlDbType.VarChar, 20).Value = ci;
+                        command.Parameters.Add("@start_date", SqlDbType.Date).Value = startDate.Date;
+                        command.Parameters.Add("@end_date", SqlDbType.Date).Value = endDate.Date;
+
+                        using (var reader = await command.ExecuteReaderAsync())
                         {
-                            asistencias.Add(new AsistenciaModel
+                            while (await reader.ReadAsync())
                             {
-                                CodigoDepartamento = reader["CodigoDepartamento"].ToString(),
-                                NombreDepartamento = reader["NombreDepartamento"].ToString(),
-                                IdCarnet = reader["idcarnet"].ToString(),
-                                Nombre = reader["nombre"]?.ToString(),
-                                ApellidoPaterno = reader["apellido_paterno"]?.ToString(),
-                                ApellidoMaterno = reader["apellido_materno"]?.ToString(),
-                                Fecha = Convert.ToDateTime(reader["fecha"]),
-                                Dia = reader["dia"].ToString(),
-                                Horario = reader["horario"].ToString(),
-                                DiaTrabajo = Convert.ToDecimal(reader["diatrabajo"]),
-                                MEntrada = reader["mentrada"]?.ToString(),
-                                MSalida = reader["msalida"]?.ToString(),
-                                Atraso = Convert.ToInt32(reader["atraso"]),
-                                SumatoriaTotalAtrasos = Convert.ToInt32(reader["Sumatoria Total Atrasos"])
-                            });
+                                try
+                                {
+                                    var asistencia = new AsistenciaModel
+                                    {
+                                        CodigoDepartamento = reader["CodigoDepartamento"]?.ToString(),
+                                        NombreDepartamento = reader["NombreDepartamento"]?.ToString(),
+                                        IdCarnet = reader["idcarnet"]?.ToString(),
+                                        Nombre = reader["nombre"]?.ToString(),
+                                        ApellidoPaterno = reader["apellido_paterno"]?.ToString(),
+                                        ApellidoMaterno = reader["apellido_materno"]?.ToString(),
+                                        Fecha = reader["fecha"] != DBNull.Value ? Convert.ToDateTime(reader["fecha"]) : DateTime.MinValue,
+                                        Dia = reader["dia"]?.ToString(),
+                                        IdHorario = reader["id_horario"] != DBNull.Value ? Convert.ToInt32(reader["id_horario"]) : 0,
+                                        Horario = reader["horario"]?.ToString(),
+                                        DiaTrabajo = reader["diatrabajo"] != DBNull.Value ? Convert.ToDecimal(reader["diatrabajo"]) : 0,
+                                        MEntrada = reader["mentrada"]?.ToString(),
+                                        MSalida = reader["msalida"]?.ToString(),
+                                        Atraso = reader["atraso"] != DBNull.Value ? Convert.ToInt32(reader["atraso"]) : 0,
+                                        SumatoriaTotalAtrasos = reader["Sumatoria Total Atrasos"] != DBNull.Value ? Convert.ToInt32(reader["Sumatoria Total Atrasos"]) : 0,
+                                        Temprano = reader["temprano"] != DBNull.Value ? Convert.ToInt32(reader["temprano"]) : 0,
+                                        Falta = reader["falta"] != DBNull.Value ? Convert.ToInt32(reader["falta"]) : 0,
+                                        Feriado = reader["feriado"]?.ToString(),
+                                        Bingreso = reader["bingreso"]?.ToString(),
+                                        Bsalida = reader["bsalida"]?.ToString()
+                                    };
+                                    asistencias.Add(asistencia);
+                                }
+                                catch (Exception ex)
+                                {
+                                    // Log del error específico al leer una fila
+                                    throw new Exception($"Error al procesar fila: {ex.Message}. CI: {ci}, Fecha: {startDate:yyyy-MM-dd} a {endDate:yyyy-MM-dd}");
+                                }
+                            }
                         }
                     }
                 }
-            }
 
-            return asistencias.Where(a => !(string.IsNullOrEmpty(a.MEntrada) && string.IsNullOrEmpty(a.MSalida))).ToList();
+                return asistencias.ToList();
+            }
+            catch (SqlException ex)
+            {
+                throw new Exception($"Error de SQL: {ex.Message}. Número: {ex.Number}, Estado: {ex.State}, Procedimiento: {ex.Procedure}");
+            }
+            catch (Exception ex)
+            {
+                throw new Exception($"Error al obtener asistencias: {ex.Message}");
+            }
         }
+        
 
         public async Task<AsistenciaPivotData> GetAsistenciasPivot(string departmentName, DateTime startDate, DateTime endDate)
         {
@@ -156,7 +211,7 @@ namespace Consolidado.Services
                         Nombres = asistencia.Nombre,
                         CI = asistencia.IdCarnet,
                         EXP = "", // Este campo deberá ser agregado a la base de datos si es necesario
-                        Turno = asistencia.Horario
+               
                     };
                 }
 
@@ -168,42 +223,32 @@ namespace Consolidado.Services
                     planillas[asistencia.IdCarnet].Marcados[fechaKey] = new MarcadoDiario
                     {
                         Fecha = fechaKey,
-                        MinutosAtraso = 0
+                        MinutosAtraso = 0 // Se calculará la suma total después
                     };
                 }
                 
                 var marcado = planillas[asistencia.IdCarnet].Marcados[fechaKey];
                 
-                // Crear un nuevo turno con sus marcaciones
-                var turno = new MarcadoTurno
+                // Agregar información del turno actual con sus respectivas entradas y salidas
+                if (!string.IsNullOrEmpty(asistencia.Horario))
                 {
-                    NombreTurno = asistencia.Horario,
-                    HoraEntrada = asistencia.MEntrada,
-                    HoraSalida = asistencia.MSalida,
-                    MinutosAtraso = asistencia.Atraso
-                };
-
-                // Agregar el turno a la lista
-                marcado.Turnos.Add(turno);
+                    var turno = new MarcadoTurno
+                    {
+                        id_turno = asistencia.IdHorario,
+                        NombreTurno = asistencia.Horario,
+                        HoraEntrada = asistencia.MEntrada,
+                        HoraSalida = asistencia.MSalida,
+                        MinutosAtraso = asistencia.Atraso
+                    };
+                    
+                    marcado.Turnos.Add(turno);
+                }
                 
                 // Actualizar el atraso total para esta fecha
                 marcado.MinutosAtraso += asistencia.Atraso;
                 
                 // Determinar el estado del marcado
                 marcado.Estado = DeterminarEstado(asistencia);
-            }
-
-            // Ordenar cronológicamente los turnos para cada marcado diario
-            foreach (var planilla in planillas.Values)
-            {
-                foreach (var marcadoPair in planilla.Marcados)
-                {
-                    var marcado = marcadoPair.Value;
-                    // Ordenar los turnos por hora de entrada (de temprano a tarde)
-                    marcado.Turnos = marcado.Turnos
-                        .OrderBy(t => string.IsNullOrEmpty(t.HoraEntrada) ? "23:59" : t.HoraEntrada)
-                        .ToList();
-                }
             }
 
             return planillas.Values;
